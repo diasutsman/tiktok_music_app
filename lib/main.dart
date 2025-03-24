@@ -32,6 +32,16 @@ class _HomePageState extends State<HomePage> {
   String? sessionCookie;
 
   void goToLogin() async {
+    if (sessionCookie != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => MusicListPage(cookies: sessionCookie!),
+        ),
+      );
+      return;
+    }
+
     final result = await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const TikTokLoginPage()),
@@ -71,6 +81,9 @@ class _HomePageState extends State<HomePage> {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Cache and cookies cleared')),
               );
+              setState(() {
+                sessionCookie = null;
+              });
             },
             child: const Text('Logout'),
           ),
