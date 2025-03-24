@@ -15,11 +15,72 @@ class TikTokMusicApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return const MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: TikTokLoginPage(),
+      home: HomePage(),
     );
   }
 }
 
+// Home page where you trigger the TikTok login and receive session cookie
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  String? sessionCookie;
+
+  void goToLogin() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const TikTokLoginPage()),
+    );
+
+    if (result != null && result is String) {
+      setState(() {
+        sessionCookie = result;
+        print('sessionCookie: $sessionCookie');
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => MusicListPage(cookies: sessionCookie!),
+          ),
+        );
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('TikTok Music App')),
+      body: Column(
+        mainAxisSize: MainAxisSize.max,
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ElevatedButton(
+            onPressed: goToLogin,
+            child: const Text('Login to TikTok'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              await InAppWebViewController.clearAllCache();
+              await CookieManager.instance().deleteAllCookies();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Cache and cookies cleared')),
+              );
+            },
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// TikTok Login Page (will pop back when sessionCookie found)
 class TikTokLoginPage extends StatefulWidget {
   const TikTokLoginPage({super.key});
 
@@ -33,45 +94,77 @@ class _TikTokLoginPageState extends State<TikTokLoginPage> {
   final String userAgent =
       'Mozilla/5.0 (Linux; Android 9; LG-H870 Build/PKQ1.190522.001) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/83.0.4103.106 Mobile Safari/537.36';
 
+  InAppWebViewController? mainWebViewController;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Login to TikTok")),
+      appBar: AppBar(title: const Text("TikTok Login")),
       body: InAppWebView(
         initialUrlRequest: URLRequest(url: WebUri(loginUrl)),
         initialSettings: InAppWebViewSettings(
           userAgent: userAgent,
           javaScriptEnabled: true,
+          javaScriptCanOpenWindowsAutomatically: true, // required!
+          cacheEnabled: false,
+          supportMultipleWindows: true, // required!
           clearSessionCache: true,
         ),
-        onLoadStop: (controller, url) async {
-          final cookiesJS = await controller.evaluateJavascript(
-            source: 'document.cookie',
-          );
-          List<Cookie> cookies = await _cookieManager.getCookies(url: url!);
-          try {
-            final sessionCookie = cookies
-                .map((c) => "${c.name}=${c.value}")
-                .join("; ");
-            print("sessionCookie: $sessionCookie");
-            print(
-              'sessionCookie.contains(\'tt_csrf_token\'): ${sessionCookie.contains('tt_csrf_token')}',
-            );
-            print("cookiesJS: $cookiesJS");
+        onWebViewCreated: (controller) {
+          mainWebViewController = controller;
+        },
+        onCreateWindow: (controller, createWindowRequest) async {
+          // Open popup window (e.g., Google OAuth) inside dialog
+          final result = await showDialog(
+            context: context,
+            builder: (context) {
+              return Dialog(
+                insetPadding: EdgeInsets.zero,
+                clipBehavior: Clip.antiAlias,
+                child: SizedBox.expand(
+                  child: InAppWebView(
+                    windowId: createWindowRequest.windowId,
+                    initialSettings: InAppWebViewSettings(
+                      userAgent: userAgent,
+                      javaScriptEnabled: true,
+                    ),
+                    onLoadStop: (controller, url) async {
+                      final cookies = await _cookieManager.getCookies(
+                        url: url!,
+                      );
+                      final sessionCookie = cookies
+                          .map((c) => "${c.name}=${c.value}")
+                          .join("; ");
 
-            if (sessionCookie.contains('tt_csrf_token')) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => MusicListPage(cookies: sessionCookie),
+                      print('showDialog sessionCookie: $sessionCookie');
+
+                      if (sessionCookie.contains('msToken')) {
+                        Navigator.pop(context, sessionCookie);
+                      }
+                    },
                   ),
-                );
-              });
-            }
-            // Pass cookies to next page
-          } catch (e) {
-            print("Session cookie not found yet.");
+                ),
+              );
+            },
+          );
+
+          print('onCreateWindow result: $result');
+
+          if (result.toString().contains('sessionid')) {
+            Navigator.pop(context, result);
+          }
+          return true;
+        },
+        onLoadStop: (controller, url) async {
+          final cookies = await _cookieManager.getCookies(url: url!);
+          final sessionCookie = cookies
+              .map((c) => "${c.name}=${c.value}")
+              .join("; ");
+
+          print('onLoadStop sessionCookie: $sessionCookie');
+
+          if (sessionCookie.contains('sessionid')) {
+            Navigator.pop(context, sessionCookie);
           }
         },
       ),
@@ -79,6 +172,7 @@ class _TikTokLoginPageState extends State<TikTokLoginPage> {
   }
 }
 
+// Music List Page
 class MusicListPage extends StatefulWidget {
   final String cookies;
   const MusicListPage({super.key, required this.cookies});
