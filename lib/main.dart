@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:dio/dio.dart';
 import 'package:just_audio/just_audio.dart';
 
@@ -28,57 +28,53 @@ class TikTokLoginPage extends StatefulWidget {
 }
 
 class _TikTokLoginPageState extends State<TikTokLoginPage> {
-  late final WebViewController _controller;
-  String? _cookies;
-
+  final CookieManager _cookieManager = CookieManager.instance();
+  final String loginUrl = "https://www.tiktok.com/login";
   final String userAgent =
-      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36';
-
-  @override
-  void initState() {
-    super.initState();
-    _controller =
-        WebViewController()
-          ..setJavaScriptMode(JavaScriptMode.unrestricted)
-          ..setUserAgent(userAgent)
-          ..setNavigationDelegate(
-            NavigationDelegate(
-              onPageFinished: (url) async {
-                final cookies = await _controller.runJavaScriptReturningResult(
-                  'document.cookie',
-                );
-                print("cookies: $cookies");
-                if (cookies.toString().toLowerCase().contains('token')) {
-                  setState(() {
-                    _cookies = cookies.toString().replaceAll('"', '');
-                  });
-                }
-              },
-            ),
-          )
-          ..loadRequest(Uri.parse('https://www.tiktok.com/login'));
-  }
+      'Mozilla/5.0 (Linux; Android 9; LG-H870 Build/PKQ1.190522.001) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/83.0.4103.106 Mobile Safari/537.36';
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Login to TikTok')),
-      body: WebViewWidget(controller: _controller),
-      floatingActionButton:
-          _cookies != null
-              ? FloatingActionButton.extended(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => MusicListPage(cookies: _cookies!),
-                    ),
-                  );
-                },
-                label: const Text('Continue'),
-                icon: const Icon(Icons.arrow_forward),
-              )
-              : null,
+      appBar: AppBar(title: const Text("Login to TikTok")),
+      body: InAppWebView(
+        initialUrlRequest: URLRequest(url: WebUri(loginUrl)),
+        initialSettings: InAppWebViewSettings(
+          userAgent: userAgent,
+          javaScriptEnabled: true,
+          clearSessionCache: true,
+        ),
+        onLoadStop: (controller, url) async {
+          final cookiesJS = await controller.evaluateJavascript(
+            source: 'document.cookie',
+          );
+          List<Cookie> cookies = await _cookieManager.getCookies(url: url!);
+          try {
+            final sessionCookie = cookies
+                .map((c) => "${c.name}=${c.value}")
+                .join("; ");
+            print("sessionCookie: $sessionCookie");
+            print(
+              'sessionCookie.contains(\'tt_csrf_token\'): ${sessionCookie.contains('tt_csrf_token')}',
+            );
+            print("cookiesJS: $cookiesJS");
+
+            if (sessionCookie.contains('tt_csrf_token')) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => MusicListPage(cookies: sessionCookie),
+                  ),
+                );
+              });
+            }
+            // Pass cookies to next page
+          } catch (e) {
+            print("Session cookie not found yet.");
+          }
+        },
+      ),
     );
   }
 }
@@ -123,7 +119,7 @@ class _MusicListPageState extends State<MusicListPage> {
           headers: {
             'Cookie': widget.cookies,
             'User-Agent':
-                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Linux; Android 9; LG-H870 Build/PKQ1.190522.001) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/83.0.4103.106 Mobile Safari/537.36',
           },
         ),
       );
